@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>板件3D查看器 - 直链版</title>
+    <title>板件3D查看器 - 测试版</title>
     <style>
         /* --- 页面样式保持不变 --- */
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -47,7 +47,7 @@
     </style>
 </head>
 <body>
-    <div id="info">📦 <span>板件3D查看器</span> · 直链版</div>
+    <div id="info">📦 <span>板件3D查看器</span> 测试版</div>
     <div id="loading-overlay"><div class="spinner"></div><div id="loading-text">准备就绪...</div></div>
     <div id="controls">
         <!-- ★★★ 修改：移除默认值 value="" ★★★ -->
@@ -513,7 +513,7 @@
                 showLoading(false);
                 updateStatus('就绪', '');
                 // 清空输入框占位提示（可选）
-                boardCodeInput.placeholder = '输入板件号，如 ups260621G1030';
+                boardCodeInput.placeholder = '输入板件号';
             }
         }
 
