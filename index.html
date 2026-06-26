@@ -46,12 +46,13 @@
         }
     </style>
 </head>
+<script src="https://cdn.jsdelivr.net/npm/polyfill-library@3.111.0/polyfill.min.js?features=default,es6,Array.prototype.includes,Promise,Object.assign"></script>
 <body>
     <div id="info">📦 <span>板件3D查看器</span> 测试版</div>
     <div id="loading-overlay"><div class="spinner"></div><div id="loading-text">准备就绪...</div></div>
     <div id="controls">
         <!-- ★★★ 修改：移除默认值 value="" ★★★ -->
-        <input type="text" id="boardCode" placeholder="输入板件号" value="">
+        <input type="text" id="boardCode" placeholder="输入板件号，如 ups260621G1030" value="">
         <button id="loadBtn">🚀 加载</button>
         <span id="status">就绪</span>
     </div>
@@ -103,7 +104,11 @@
         camera.position.set(3000, -4000, 3000);
         camera.lookAt(0, 0, 0);
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+		const renderer = new THREE.WebGLRenderer({
+		antialias: true,
+		powerPreference: "default", // 让系统自动选择GPU
+		failIfMajorPerformanceCaveat: false, // ★ 关键：即使性能不佳也尝试创建上下文
+		});
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.shadowMap.enabled = true;
