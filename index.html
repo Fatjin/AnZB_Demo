@@ -107,7 +107,7 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        ///renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         document.body.appendChild(renderer.domElement);
 
         const labelRenderer = new CSS2DRenderer();
@@ -162,13 +162,13 @@
         });
         const ground = new THREE.Mesh(groundGeometry, groundMaterial);
         ground.position.z = 0;
-        ground.receiveShadow = true;
+        ///ground.receiveShadow = true;
         scene.add(ground);
 
-        const gridHelper = new THREE.GridHelper(8000, 40, 0xccbbaa, 0xddccbb);
-        gridHelper.position.z = 0;
-        gridHelper.rotation.x = Math.PI / 2;
-        scene.add(gridHelper);
+        ///const gridHelper = new THREE.GridHelper(8000, 40, 0xccbbaa, 0xddccbb);
+        ///gridHelper.position.z = 0;
+        ///gridHelper.rotation.x = Math.PI / 2;
+        ///scene.add(gridHelper);
 
         const ringGeometry = new THREE.RingGeometry(80, 120, 64);
         const ringMaterial = new THREE.MeshBasicMaterial({
@@ -177,9 +177,9 @@
             transparent: true,
             opacity: 0.15
         });
-        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-        ring.position.z = 0;
-        scene.add(ring);
+        ///const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        ///ring.position.z = 0;
+        ///scene.add(ring);
 
         // --- 主容器 ---
         let mainGroup = new THREE.Group();
@@ -364,9 +364,9 @@
                 }
 
                 const mesh = new THREE.Mesh(geometry, material);
-                mesh.castShadow = true;
-                mesh.receiveShadow = true;
-                mesh.userData = { partNo: b.partNo, packNo: b.packNo, isTarget: isTarget };
+                ///mesh.castShadow = true;
+                ///mesh.receiveShadow = true;
+                ///mesh.userData = { partNo: b.partNo, packNo: b.packNo, isTarget: isTarget };
 
                 const matrix = buildTransformMatrix(b, isHedra);
                 mesh.applyMatrix4(matrix);
