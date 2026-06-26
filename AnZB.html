@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>板件3D查看器 - 直链版</title>
+    <style>
+        /* --- 页面样式保持不变，略作优化 --- */
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #info { position: absolute; top: 20px; left: 20px; color: #333; background: rgba(255, 248, 235, 0.85); padding: 8px 18px; border-radius: 20px; z-index: 100; font-size: 14px; pointer-events: none; backdrop-filter: blur(4px); border: 1px solid rgba(200, 180, 150, 0.3); box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        #info span { color: #c0392b; font-weight: bold; }
+        #controls {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            z-index: 100; display: flex; gap: 10px;
+            background: rgba(255, 248, 235, 0.92); padding: 12px 20px; border-radius: 50px;
+            backdrop-filter: blur(8px); border: 1px solid rgba(200, 180, 150, 0.3);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12); flex-wrap: wrap;
+            justify-content: center; align-items: center; min-width: 280px;
+        }
+        #controls input { padding: 8px 16px; border: none; border-radius: 30px; width: 200px; font-size: 14px; background: rgba(255,255,255,0.8); color: #333; outline: 1px solid rgba(200, 180, 150, 0.4); transition: all 0.3s; }
+        #controls input:focus { outline: 1px solid #c0392b; background: white; }
+        #controls input::placeholder { color: #999; }
+        #controls button { padding: 8px 22px; background: linear-gradient(135deg, #c0392b, #e74c3c); color: white; border: none; border-radius: 30px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; box-shadow: 0 4px 12px rgba(192, 57, 43, 0.3); }
+        #controls button:hover { transform: scale(1.05); box-shadow: 0 6px 20px rgba(192, 57, 43, 0.4); }
+        #controls button:active { transform: scale(0.95); }
+        #status { color: #555; font-size: 13px; margin-left: 10px; min-width: 80px; text-align: center; font-weight: 500; }
+        #status.success { color: #27ae60; }
+        #status.loading { color: #f39c12; }
+        #status.error { color: #e74c3c; }
+        #loading-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+            background: rgba(245, 235, 220, 0.85); z-index: 50; color: #555; font-size: 18px;
+            flex-direction: column; gap: 20px; pointer-events: none;
+            transition: opacity 0.5s;
+        }
+        #loading-overlay.hidden { opacity: 0; }
+        .spinner { width: 50px; height: 50px; border: 4px solid rgba(192, 57, 43, 0.15); border-top: 4px solid #c0392b; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @media (max-width: 600px) {
+            #controls { width: 90%; padding: 10px 15px; border-radius: 30px; gap: 8px; }
+            #controls input { width: 140px; font-size: 13px; }
+            #controls button { font-size: 13px; padding: 6px 16px; }
+            #status { font-size: 12px; min-width: 60px; margin-left: 5px; }
+            #info { font-size: 12px; top: 10px; left: 10px; padding: 4px 12px; }
+        }
+    </style>
+</head>
+<body>
+    <div id="info">📦 <span>板件3D查看器</span> · 测试版</div>
+    <div id="loading-overlay"><div class="spinner"></div><div id="loading-text">正在加载默认板件...</div></div>
+    <div id="controls">
+        <input type="text" id="boardCode" placeholder="输入板件号，如 ups260621G1030" value="ups260621G1030">
+        <button id="loadBtn">🚀 加载</button>
+        <span id="status">就绪</span>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        // --- DOM 引用 ---
+        const boardCodeInput = document.getElementById('boardCode');
+        const loadBtn = document.getElementById('loadBtn');
+        const statusEl = document.getElementById('status');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const loadingText = document.getElementById('loading-text');
+
+        // --- ★★★ 新增：从URL读取板件号 ★★★ ---
+        function getBoardCodeFromURL() {
+            // 优先从 search (?) 中读取
+            const searchParams = new URLSearchParams(window.location.search);
+            let code = searchParams.get('code');
+            if (code) return code.trim();
+
+            // 如果 search 中没有，从 hash (#) 中读取
+            const hash = window.location.hash;
+            if (hash) {
+                const hashParams = new URLSearchParams(hash.substring(1));
+                code = hashParams.get('code');
+                if (code) return code.trim();
+
+                // 兼容旧的 #?code=xxx 格式
+                const match = hash.match(/[?&]code=([^&#]*)/);
+                if (match) return decodeURIComponent(match[1]).trim();
+            }
+
+            return null;
+        }
+
+        // --- 场景初始化 ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf5efe6);
+
+        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 100000);
+        camera.up.set(0, 0, 1);
+        camera.position.set(3000, -4000, 3000);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        labelRenderer.domElement.style.left = '0px';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        document.body.appendChild(labelRenderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.target.set(0, 0, 0);
+        controls.minDistance = 200;
+        controls.maxDistance = 20000;
+        controls.update();
+
+        // --- 光照 ---
+        const ambientLight = new THREE.AmbientLight(0x404060, 0.5);
+        scene.add(ambientLight);
+
+        const mainLight = new THREE.DirectionalLight(0xffeedd, 1.6);
+        mainLight.position.set(2000, -3000, 4000);
+        mainLight.castShadow = true;
+        mainLight.shadow.mapSize.width = 1024;
+        mainLight.shadow.mapSize.height = 1024;
+        const d = 8000;
+        mainLight.shadow.camera.left = -d;
+        mainLight.shadow.camera.right = d;
+        mainLight.shadow.camera.top = d;
+        mainLight.shadow.camera.bottom = -d;
+        mainLight.shadow.camera.near = 100;
+        mainLight.shadow.camera.far = 10000;
+        scene.add(mainLight);
+
+        const fillLight = new THREE.DirectionalLight(0x88bbff, 0.6);
+        fillLight.position.set(-2000, 1000, -2000);
+        scene.add(fillLight);
+
+        const rimLight = new THREE.DirectionalLight(0xffffff, 0.4);
+        rimLight.position.set(-1000, -2000, -3000);
+        scene.add(rimLight);
+
+        // --- 平台面 ---
+        const groundGeometry = new THREE.PlaneGeometry(10000, 10000);
+        const groundMaterial = new THREE.MeshStandardMaterial({
+            color: 0xe8ddd0,
+            transparent: true,
+            opacity: 0.6,
+            side: THREE.DoubleSide
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.position.z = 0;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        const gridHelper = new THREE.GridHelper(8000, 40, 0xccbbaa, 0xddccbb);
+        gridHelper.position.z = 0;
+        gridHelper.rotation.x = Math.PI / 2;
+        scene.add(gridHelper);
+
+        const ringGeometry = new THREE.RingGeometry(80, 120, 64);
+        const ringMaterial = new THREE.MeshBasicMaterial({
+            color: 0xc0392b,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.15
+        });
+        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        ring.position.z = 0;
+        scene.add(ring);
+
+        // --- 主容器 ---
+        let mainGroup = new THREE.Group();
+        scene.add(mainGroup);
+        let targetBoardCode = '';
+
+        // --- 工具函数 ---
+        function updateStatus(msg, type = '') {
+            statusEl.textContent = msg;
+            statusEl.className = type;
+        }
+        function showLoading(show, text = '加载中...') {
+            if (show) { loadingOverlay.classList.remove('hidden'); loadingText.textContent = text; }
+            else { loadingOverlay.classList.add('hidden'); }
+        }
+        function getNodeText(parent, tagName) {
+            const el = parent.getElementsByTagName(tagName);
+            if (el.length > 0 && el[0].firstChild) return el[0].firstChild.nodeValue.trim();
+            return '';
+        }
+        function parseVector(str) {
+            if (!str) return new THREE.Vector3(0, 0, 0);
+            const parts = str.split(',').map(s => parseFloat(s.trim()));
+            return new THREE.Vector3(parts[0] || 0, parts[1] || 0, parts[2] || 0);
+        }
+        function parsePolyline(node) {
+            const ptsNode = node.getElementsByTagName('Pts');
+            if (ptsNode.length === 0) return null;
+            const children = ptsNode[0].children;
+            if (children.length === 0) return null;
+            const points = [];
+            for (let ptNode of children) {
+                const str = ptNode.firstChild ? ptNode.firstChild.nodeValue : '';
+                points.push(parseVector(str));
+            }
+            return points;
+        }
+        function parseBoards(xmlDoc) {
+            const boardNodes = xmlDoc.getElementsByTagName('Board');
+            const boards = [];
+            for (let node of boardNodes) {
+                try {
+                    const pl = parsePolyline(node);
+                    boards.push({
+                        partNo: getNodeText(node, 'PartNo') || '未知',
+                        packNo: getNodeText(node, 'PackNo') || '未知',
+                        orgPt: parseVector(getNodeText(node, 'OrgPt')),
+                        vx: parseVector(getNodeText(node, 'Vx')),
+                        vy: parseVector(getNodeText(node, 'Vy')),
+                        vz: parseVector(getNodeText(node, 'Vz')),
+                        dL: parseFloat(getNodeText(node, 'L')) || 0,
+                        dW: parseFloat(getNodeText(node, 'W')) || 0,
+                        dH: parseFloat(getNodeText(node, 'H')) || 0,
+                        bMat: getNodeText(node, 'BMat') || '默认',
+                        pl: pl
+                    });
+                } catch (e) { console.warn('解析单个板件出错:', e); }
+            }
+            return boards;
+        }
+
+        // --- 坐标修正函数 ---
+        function normalizeBoardsToPlatform(boards) {
+            if (!boards || boards.length === 0) return boards;
+            let minZ = Infinity;
+            boards.forEach(b => {
+                const bottomZ = b.orgPt.z - b.dH / 2;
+                if (bottomZ < minZ) minZ = bottomZ;
+            });
+            if (minZ === Infinity || minZ === 0) return boards;
+            const offsetZ = -minZ;
+            boards.forEach(b => { b.orgPt.z += offsetZ; });
+            console.log(`📐 板件平移到平台: 偏移 Z = ${offsetZ.toFixed(2)}`);
+            return boards;
+        }
+
+        function centerBoardsOnPlatform(boards) {
+            if (!boards || boards.length === 0) return boards;
+            const box = new THREE.Box3();
+            boards.forEach(b => {
+                const halfL = b.dL / 2 || 50;
+                const halfW = b.dW / 2 || 50;
+                const halfH = b.dH / 2 || 50;
+                const min = new THREE.Vector3(b.orgPt.x - halfL, b.orgPt.y - halfW, b.orgPt.z - halfH);
+                const max = new THREE.Vector3(b.orgPt.x + halfL, b.orgPt.y + halfW, b.orgPt.z + halfH);
+                box.expandByPoint(min);
+                box.expandByPoint(max);
+            });
+            if (box.isEmpty()) return boards;
+            const center = box.getCenter(new THREE.Vector3());
+            const offsetX = -center.x;
+            const offsetY = -center.y;
+            if (Math.abs(offsetX) < 0.01 && Math.abs(offsetY) < 0.01) return boards;
+            boards.forEach(b => {
+                b.orgPt.x += offsetX;
+                b.orgPt.y += offsetY;
+            });
+            console.log(`📐 板件居中: 偏移 X = ${offsetX.toFixed(2)}, Y = ${offsetY.toFixed(2)}`);
+            return boards;
+        }
+
+        function buildTransformMatrix(b, isHedra) {
+            const matrix = new THREE.Matrix4();
+            matrix.setPosition(b.orgPt);
+            const rotMatrix = new THREE.Matrix4();
+            rotMatrix.makeBasis(b.vx, b.vy, b.vz);
+            matrix.multiply(rotMatrix);
+            const offset = new THREE.Matrix4();
+            if (isHedra) offset.makeTranslation(0, 0, b.dH / 2);
+            else offset.makeTranslation(b.dL / 2, b.dW / 2, b.dH / 2);
+            matrix.multiply(offset);
+            return matrix;
+        }
+
+        function isBoardMatching(partNo, targetCode) {
+            if (!partNo || !targetCode) return false;
+            return partNo.trim().toLowerCase() === targetCode.trim().toLowerCase();
+        }
+
+        // --- 渲染板件 ---
+        function renderBoards(boards, highlightCode) {
+            while (mainGroup.children.length > 0) {
+                const child = mainGroup.children[0];
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+                mainGroup.remove(child);
+            }
+            if (!boards || boards.length === 0) return;
+
+            console.log('🔍 目标板件号:', highlightCode);
+            console.log('📋 从XML解析到的板件号列表:');
+            boards.forEach(b => { console.log(`   - "${b.partNo}"`); });
+
+            let processedBoards = normalizeBoardsToPlatform(boards);
+            processedBoards = centerBoardsOnPlatform(processedBoards);
+
+            const box3 = new THREE.Box3();
+            let targetMesh = null;
+            let matchFound = false;
+
+            processedBoards.forEach((b) => {
+                const isTarget = isBoardMatching(b.partNo, highlightCode);
+                if (isTarget) {
+                    matchFound = true;
+                    console.log(`🎯 匹配成功！板件号: "${b.partNo}" 与目标 "${highlightCode}" 匹配`);
+                }
+
+                let geometry;
+                let isHedra = false;
+                if (b.pl && b.pl.length > 2) {
+                    const shape = new THREE.Shape();
+                    const pts = b.pl;
+                    shape.moveTo(pts[0].x, pts[0].y);
+                    for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i].x, pts[i].y);
+                    const extrudeSettings = { steps: 1, depth: b.dH || 10, bevelEnabled: false };
+                    geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                    isHedra = true;
+                } else {
+                    const w = b.dL || 10, h = b.dW || 10, d = b.dH || 10;
+                    geometry = new THREE.BoxGeometry(w, h, d);
+                }
+
+                let material;
+                if (isTarget) {
+                    material = new THREE.MeshStandardMaterial({
+                        color: 0xc0392b,
+                        emissive: 0x330000,
+                        roughness: 0.25,
+                        metalness: 0.2,
+                        transparent: false,
+                        opacity: 1.0,
+                    });
+                } else {
+                    material = new THREE.MeshStandardMaterial({
+                        color: 0xbbaa99,
+                        roughness: 0.6,
+                        metalness: 0.05,
+                        transparent: true,
+                        opacity: 0.35,
+                        depthWrite: false,
+                    });
+                }
+
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                mesh.userData = { partNo: b.partNo, packNo: b.packNo, isTarget: isTarget };
+
+                const matrix = buildTransformMatrix(b, isHedra);
+                mesh.applyMatrix4(matrix);
+                mainGroup.add(mesh);
+
+                const lineMat = new THREE.LineBasicMaterial({
+                    color: isTarget ? 0xe67e22 : 0x998877,
+                    transparent: true,
+                    opacity: isTarget ? 0.9 : 0.15
+                });
+                const edges = new THREE.EdgesGeometry(geometry);
+                const line = new THREE.LineSegments(edges, lineMat);
+                line.applyMatrix4(matrix);
+                mainGroup.add(line);
+
+                if (isTarget) {
+                    const labelDiv = document.createElement('div');
+                    labelDiv.textContent = b.partNo;
+                    labelDiv.style.color = '#fff';
+                    labelDiv.style.fontSize = '18px';
+                    labelDiv.style.fontWeight = 'bold';
+                    labelDiv.style.textShadow = '0 0 20px rgba(192,57,43,0.9), 0 0 40px rgba(192,57,43,0.6)';
+                    labelDiv.style.background = 'rgba(192,57,43,0.85)';
+                    labelDiv.style.padding = '4px 16px';
+                    labelDiv.style.borderRadius = '20px';
+                    labelDiv.style.border = '2px solid #e67e22';
+                    labelDiv.style.backdropFilter = 'blur(4px)';
+                    labelDiv.style.pointerEvents = 'none';
+                    labelDiv.style.fontSize = '16px';
+                    labelDiv.style.boxShadow = '0 0 30px rgba(192,57,43,0.4)';
+                    const label = new CSS2DObject(labelDiv);
+                    const center = new THREE.Vector3(0, 0, (b.dH || 10) / 2 + 60);
+                    label.position.copy(center);
+                    label.applyMatrix4(matrix);
+                    mainGroup.add(label);
+                    targetMesh = mesh;
+                }
+
+                const meshBox = new THREE.Box3().setFromObject(mesh);
+                box3.union(meshBox);
+            });
+
+            if (!matchFound) {
+                console.warn(`⚠️ 未找到匹配的板件号: "${highlightCode}"`);
+            }
+
+            if (targetMesh) {
+                const targetBox = new THREE.Box3().setFromObject(targetMesh);
+                const center = targetBox.getCenter(new THREE.Vector3());
+                const size = targetBox.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const distance = maxDim * 2.0 + 300;
+                camera.position.set(center.x + distance * 0.5, center.y - distance * 0.5, center.z + distance * 0.7);
+                controls.target.copy(center);
+                controls.update();
+            } else if (!box3.isEmpty()) {
+                const size = box3.getSize(new THREE.Vector3());
+                const center = box3.getCenter(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const distance = maxDim * 1.8 + 500;
+                camera.position.set(center.x + distance * 0.5, center.y - distance * 0.5, center.z + distance * 0.7);
+                controls.target.copy(center);
+                controls.update();
+            }
+        }
+
+        // --- 从服务器加载数据 ---
+        async function loadBoardFromServer(boardCode) {
+            const apiUrl = `https://pc0411a.yfyun.net/api/anzhuangbao/getorderxml2?BoardCode=${encodeURIComponent(boardCode)}`;
+            updateStatus('⏳ 请求数据...', 'loading');
+            showLoading(true, `正在加载板件 ${boardCode}...`);
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) throw new Error(`HTTP错误: ${response.status}`);
+                const xmlText = await response.text();
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+                const parseError = xmlDoc.querySelector('parsererror');
+                if (parseError) throw new Error('XML解析失败');
+                const boards = parseBoards(xmlDoc);
+                if (boards.length === 0) throw new Error('未找到板件数据');
+                updateStatus(`✅ 加载成功 (${boards.length}块)`, 'success');
+                showLoading(false);
+                return boards;
+            } catch (error) {
+                console.error('加载失败:', error);
+                updateStatus('❌ 加载失败: ' + error.message, 'error');
+                showLoading(false);
+                return null;
+            }
+        }
+
+        // --- 主流程 ---
+        async function loadBoard(code) {
+            // 如果传入了code参数，使用它；否则从输入框读取
+            const boardCode = code || boardCodeInput.value.trim();
+            if (!boardCode) {
+                updateStatus('⚠️ 请输入板件号', 'error');
+                return;
+            }
+            // 同步更新输入框
+            boardCodeInput.value = boardCode;
+            targetBoardCode = boardCode;
+            const boards = await loadBoardFromServer(boardCode);
+            if (boards) {
+                renderBoards(boards, targetBoardCode);
+            }
+        }
+
+        // --- 事件绑定 ---
+        loadBtn.addEventListener('click', () => loadBoard());
+        boardCodeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadBoard(); });
+
+        // --- 窗口自适应 ---
+        window.addEventListener('resize', () => {
+            const w = window.innerWidth, h = window.innerHeight;
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h);
+            labelRenderer.setSize(w, h);
+        });
+
+        // --- 动画循环 ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+        animate();
+
+        // --- ★★★ 启动：优先从URL读取板件号 ★★★ ---
+        function init() {
+            const urlCode = getBoardCodeFromURL();
+            if (urlCode) {
+                console.log(`🔗 从URL读取到板件号: "${urlCode}"`);
+                // 自动加载
+                setTimeout(() => {
+                    loadBoard(urlCode);
+                }, 300);
+            } else {
+                // 没有URL参数，加载默认板件
+                setTimeout(() => {
+                    loadBoard();
+                }, 300);
+            }
+        }
+
+        init();
+
+        // 暴露调试接口
+        window.__scene = scene;
+        window.__camera = camera;
+        window.__controls = controls;
+        window.__loadBoard = loadBoard;
+        console.log('✅ 板件3D查看器（直链版）已启动！');
+        console.log('💡 支持直链参数: ?code=板件号 或 #?code=板件号');
+        console.log('💡 示例: 你的域名/Viewer3D.html?code=ups260621G1030');
+    </script>
+</body>
+</html>
